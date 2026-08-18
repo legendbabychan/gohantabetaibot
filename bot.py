@@ -7,7 +7,7 @@ from threading import Thread
 from flask import Flask
 import discord
 from discord.ext import commands
-from janome.tokenizer import Tokenizer
+from sudachipy import dictionary, tokenizer
 
 # --------------------------------------------------
 # Webサーバーの設定（Render常時起動用）
@@ -31,7 +31,8 @@ INTENTS.message_content = True
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
 # 形態素解析器の初期化
-tokenizer = Tokenizer()
+tokenizer_obj = dictionary.Dictionary().create()
+mode = tokenizer.Tokenizer.SplitMode.C
 
 # 一時的な記憶（メモリー）
 last_food_dict = {}          # チャンネルごとの直近の食べ物 {channel_id: "単語"}
@@ -341,16 +342,16 @@ async def on_message(message):
         return
 
     # --- 7. 会話内の食べ物（名詞）抽出と反応 ---
-    tokens = tokenizer.tokenize(content)
+    tokens = tokenizer_obj.tokenize(content, mode)
     detected_words = []
 
     NOISE_PATTERN = re.compile(r'^(w+|ｗ+|草+|笑+|あ|い|う|え|お|これ|それ|あれ|どれ|やつ|こと|もの|ため|よう|さん|ちゃん|くん|てす|テスト)$', re.IGNORECASE)
 
     for token in tokens:
-        pos = token.part_of_speech.split(',')
-
-        if pos[0] == '名詞' and pos[1] in ['一般', '固有名詞', 'サ変接続']:
-            surface = token.surface.strip()
+        pos = token.part_of_speech()
+        # pos[0]: 品詞, pos[1]: 品詞細分類1
+        if pos[0] == '名詞' and pos[1] in ['普通名詞', '固有名詞']:
+            surface = token.surface().strip()
 
             if len(surface) <= 1:
                 continue
@@ -362,7 +363,7 @@ async def on_message(message):
             if NOISE_PATTERN.match(surface):
                 continue
 
-            if pos[1] in ['非自立', '数接続', '代名詞']:
+            if pos[1] in ['非自立可能', '副詞可能']:
                 continue
 
             detected_words.append(surface)
@@ -370,7 +371,7 @@ async def on_message(message):
     if detected_words:
         selected_word = detected_words[0]
         last_food_dict[channel_id] = selected_word
-        await message.channel.send(f"{selected_word}、食べたいなぁ")
+        await message.channel.send(f"{selected_word}、食べたいなぁ")	
 
 # --------------------------------------------------
 # アプリケーション起動処理

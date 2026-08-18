@@ -1,3 +1,4 @@
 discord.py
-janome
+sudachipy
+sudachidict_core
 Flask
