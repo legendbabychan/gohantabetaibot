@@ -379,5 +379,6 @@ async def on_message(message):
 Thread(target=run_flask).start()
 
 # 2. Discord Botの起動
-# トークンを直書きせず、一時的にダミーにしておく
-bot.run("YOUR_BOT_TOKEN")
+# 環境変数からトークンを安全に読み込んで起動する
+TOKEN = os.environ.get("DISCORD_TOKEN")
+bot.run(TOKEN)
