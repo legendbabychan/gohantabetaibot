@@ -2,12 +2,17 @@ import sqlite3
 import random
 import re
 import os
+import sys
+import logging
 from datetime import date
 from threading import Thread
 from flask import Flask
 import discord
 from discord.ext import commands
 from sudachipy import dictionary, tokenizer
+
+# ログ出力のフォーマットを設定（Renderログに詳細を表示させる）
+logging.basicConfig(level=logging.INFO)
 
 # --------------------------------------------------
 # Webサーバーの設定（Render常時起動用）
@@ -20,6 +25,9 @@ def home():
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
+    # Werkzeugのログ出力を抑制してDiscordログを見やすくする
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
     app.run(host='0.0.0.0', port=port)
 
 # --------------------------------------------------
@@ -31,8 +39,12 @@ INTENTS.message_content = True
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
 # 形態素解析器の初期化
-tokenizer_obj = dictionary.Dictionary().create()
-mode = tokenizer.Tokenizer.SplitMode.C
+try:
+    tokenizer_obj = dictionary.Dictionary().create()
+    mode = tokenizer.Tokenizer.SplitMode.C
+    print("✅ SudachiPy の初期化に成功しました。")
+except Exception as e:
+    print(f"❌ SudachiPy の初期化エラー: {e}")
 
 # 一時的な記憶（メモリー）
 last_food_dict = {}          # チャンネルごとの直近の食べ物 {channel_id: "単語"}
@@ -94,7 +106,7 @@ def init_db():
     if "pet_name" not in columns:
         cursor.execute("ALTER TABLE user_points ADD COLUMN pet_name TEXT DEFAULT 'ごはんたべたい'")
     if "gender" not in columns:
-        cursor.execute("ALTER TABLE user_points ADD COLUMN gender TEXT DEFAULT 'オス'")
+        cursor.execute("ALTER TABLE user_points ADD COLUMN gender INTEGER DEFAULT 'オス'")
     if "stage" not in columns:
         cursor.execute("ALTER TABLE user_points ADD COLUMN stage INTEGER DEFAULT 1")
 
@@ -211,7 +223,9 @@ def process_toilet(user_id: int) -> tuple[bool, int, str, int, int, bool]:
 @bot.event
 async def on_ready():
     init_db()
-    print(f"Logged in as {bot.user.name}")
+    print("=" * 50)
+    print(f"🎉 ログイン成功！ Bot名: {bot.user.name} (ID: {bot.user.id})")
+    print("=" * 50)
 
 @bot.event
 async def on_message(message):
@@ -349,7 +363,6 @@ async def on_message(message):
 
     for token in tokens:
         pos = token.part_of_speech()
-        # pos[0]: 品詞, pos[1]: 品詞細分類1
         if pos[0] == '名詞' and pos[1] in ['普通名詞', '固有名詞']:
             surface = token.surface().strip()
 
@@ -376,10 +389,28 @@ async def on_message(message):
 # --------------------------------------------------
 # アプリケーション起動処理
 # --------------------------------------------------
-# 1. Flask（Webサーバー）を別スレッドでバックグラウンド起動
-Thread(target=run_flask).start()
+if __name__ == "__main__":
+    print("🚀 アプリケーションを起動しています...")
+    
+    # 1. Flask（Webサーバー）をデーモンスレッドでバックグラウンド起動
+    t = Thread(target=run_flask, daemon=True)
+    t.start()
+    print("🌐 Webサーバー (Flask) を起動しました。")
 
-# 2. Discord Botの起動
-# 環境変数からトークンを安全に読み込んで起動する
-TOKEN = os.environ.get("DISCORD_TOKEN")
-bot.run(TOKEN)
+    # 2. Discord Botの起動
+    TOKEN = os.environ.get("DISCORD_TOKEN")
+    
+    if not TOKEN:
+        print("❌ 【重大なエラー】環境変数 'DISCORD_TOKEN' が取得できませんでした！ RenderのEnvironment画面を確認してください。")
+    else:
+        # 文字列の前後に余分な空白や改行が入っている場合の自動削除
+        TOKEN = TOKEN.strip()
+        print("🔑 トークンの取得に成功しました。Discordへの接続を開始します...")
+        try:
+            bot.run(TOKEN)
+        except discord.errors.LoginFailure:
+            print("❌ 【ログインエラー】トークンが無効です。Discord Developer PortalでReset Tokenをして貼り直し、Renderで保存したか確認してください。")
+        except discord.errors.PrivilegedIntentsRequired:
+            print("❌ 【Intentsエラー】Discord Developer Portalの'Bot'ページで'MESSAGE CONTENT INTENT'をONにしてください。")
+        except Exception as e:
+            print(f"❌ 【予期せぬエラーが発生しました】: {e}")
