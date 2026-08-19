@@ -13,13 +13,11 @@ from sudachipy import dictionary, tokenizer
 
 # --------------------------------------------------
 # 1. ログ設定
-# Renderのログ画面に詳細を出力するための基本設定
 # --------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 
 # --------------------------------------------------
-# 2. Webサーバー設定 (Renderの常時起動対策)
-# Renderがスリープするのを防ぐため、バックグラウンドで簡単なWebサーバーを動かす
+# 2. Webサーバー設定 (Render常時起動用)
 # --------------------------------------------------
 app = Flask('')
 
@@ -28,9 +26,7 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    # Renderから割り当てられるポート番号を取得 (無ければ8080)
     port = int(os.environ.get("PORT", 8080))
-    # 不要なWebアクセスログを隠して、Discord側のログを見やすくする
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     app.run(host='0.0.0.0', port=port)
@@ -39,11 +35,10 @@ def run_flask():
 # 3. Botの基本設定・権限指定
 # --------------------------------------------------
 INTENTS = discord.Intents.default()
-INTENTS.message_content = True  # メッセージの内容を読み取る権限を許可
+INTENTS.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
-# 形態素解析器（SudachiPy）の初期化
 try:
     tokenizer_obj = dictionary.Dictionary().create()
     mode = tokenizer.Tokenizer.SplitMode.C
@@ -51,26 +46,60 @@ try:
 except Exception as e:
     print(f"❌ SudachiPy の初期化エラー: {e}")
 
-# --- 一時記憶（メモリー） ---
-# サーバーが再起動すると消える一時的なデータ
-last_food_dict = {}          # チャンネルごとの直近の食べ物 {チャンネルID: "単語"}
-confirm_leaving_set = set()  # 「旅に出ろ」と言われて「いってらっしゃい」の返答待ちユーザーID
+# 一時記憶
+last_food_dict = {}          # {channel_id: "単語"}
+confirm_leaving_set = set()  # 返答待ちユーザーID
 
 # --------------------------------------------------
-# 4. ゲーム設定・各種データ定義（★ここで数値を調整できます）
+# 4. ゲーム設定・各種データ定義
 # --------------------------------------------------
-DEFAULT_PET_NAME = "ごはんたべたい"  # 初期表示される名前
-MAX_TOILET_PER_DAY = 10              # 1日の最大トイレ回数
+DEFAULT_PET_NAME = "なぞのたまご"  # 初期表示される名前
+MAX_TOILET_PER_DAY = 10           # 1日の最大トイレ回数
 
-# 進化形態の設定（stage: {"name": 名前, "height": 身長}）
+# ★ 進化フォームの詳細データ構造
 EVOLUTION_FORMS = {
-    1: {"name": "なぞの幼体", "height": "5ごはん"},
-    2: {"name": "成長期いきもの", "height": "7ごはん"},
-    3: {"name": "かんぜんたい", "height": "10ごはん"}
+    # 第1段階（共通）
+    "stage1": {
+        "name": "なぞのたまご",
+        "height": "3ごはん",
+        "desc": "なにが生まれるかわからない不思議データ"
+    },
+    
+    # 第2段階（タイプA〜E）
+    "stage2": {
+        "A": {"name": "ぷるぷるゼリー", "height": "5ごはん", "desc": "丸くてぷるぷる、ゼリー状の小さい青色の生き物"},
+        "B": {"name": "ちびドラゴン",   "height": "8ごはん", "desc": "赤色の小さなドラゴン。人間の肩に乗るサイズ"},
+        "C": {"name": "ふたばボール",   "height": "4ごはん", "desc": "小さな双葉が生えた緑色の球体"},
+        "D": {"name": "みずのさかな",   "height": "6ごはん", "desc": "水でできた少し透けている魚"},
+        "E": {"name": "かみなりぐも",   "height": "6ごはん", "desc": "黄色い電気がぴりぴりしている雷雲"}
+    },
+    
+    # 第3段階（タイプ × 性別）
+    "stage3": {
+        "A": {
+            "オス": {"name": "ぷるぷるキング", "height": "9ごはん", "desc": "王様の冠をつけた少し固めの青いゼリー"},
+            "メス": {"name": "ぷるぷるプリンセス", "height": "8ごはん", "desc": "お姫様の冠をつけた少し固めの紫ゼリー"}
+        },
+        "B": {
+            "オス": {"name": "レッドドラゴン", "height": "15ごはん", "desc": "人間より少し大きい赤い龍。赤い炎を吐く"},
+            "メス": {"name": "イエロードラゴン", "height": "13ごはん", "desc": "人間より少し大きい黄色い龍。黄色の炎を吐く"}
+        },
+        "C": {
+            "オス": {"name": "たいぼくのたぬき", "height": "10ごはん", "desc": "トトロの木のような立派な大樹の姿"},
+            "メス": {"name": "サンフラワー",     "height": "8ごはん", "desc": "ひまわりのようなきれいなお花の姿"}
+        },
+        "D": {
+            "オス": {"name": "ディープイルカ", "height": "12ごはん", "desc": "深い青色の水でできたイルカ"},
+            "メス": {"name": "アクアイルカ",   "height": "12ごはん", "desc": "鮮やかな水色でできたイルカ"}
+        },
+        "E": {
+            "オス": {"name": "ブルーサンダー",   "height": "14ごはん", "desc": "水色の雷をまとった2足歩行の電撃戦士"},
+            "メス": {"name": "ピンクサンダー",   "height": "14ごはん", "desc": "ピンク色の雷をまとった2足歩行の電撃戦士"}
+        }
+    }
 }
 
-# ごはんを食べさせた時のポイントと評価メッセージのテーブル
-# (獲得ポイント, 表示されるメッセージ)
+# ごはん評価テーブル (獲得せいちょう, コメント)
 POINT_TABLE = [
     (1, "おいしくない"),
     (3, "ふつう"),
@@ -79,8 +108,7 @@ POINT_TABLE = [
     (-5, "おなかを壊した")
 ]
 
-# トイレに行かせた時のポイントと評価メッセージのテーブル
-# (獲得ポイント, 表示されるメッセージ)
+# トイレ評価テーブル (獲得せいちょう, コメント)
 TOILET_TABLE = [
     (3, "すっきり！"),
     (1, "治った！"),
@@ -91,74 +119,79 @@ TOILET_TABLE = [
 
 # --------------------------------------------------
 # 5. データベース処理 (SQLite)
-# ユーザーのポイントやペットのデータを永続保存する仕組み
 # --------------------------------------------------
 def init_db():
-    """データベースとテーブルの初期化（無ければ自動作成）"""
     conn = sqlite3.connect("gohan_bot.db")
     cursor = conn.cursor()
     
-    # テーブル作成
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_points (
             user_id INTEGER PRIMARY KEY,
             points INTEGER DEFAULT 0,
             toilet_count INTEGER DEFAULT 0,
             last_toilet_date TEXT DEFAULT '',
-            pet_name TEXT DEFAULT 'ごはんたべたい',
+            pet_name TEXT DEFAULT '',
             gender TEXT DEFAULT 'オス',
-            stage INTEGER DEFAULT 1
+            stage INTEGER DEFAULT 1,
+            pet_type TEXT DEFAULT ''
         )
     """)
     
-    # テーブルの既存カラム（列）を確認し、足りない場合は追加する
+    # 既存のカラムチェック＆自動追加
     cursor.execute("PRAGMA table_info(user_points)")
     columns = [column[1] for column in cursor.fetchall()]
     
-    if "toilet_count" not in columns:
-        cursor.execute("ALTER TABLE user_points ADD COLUMN toilet_count INTEGER DEFAULT 0")
-    if "last_toilet_date" not in columns:
-        cursor.execute("ALTER TABLE user_points ADD COLUMN last_toilet_date TEXT DEFAULT ''")
-    if "pet_name" not in columns:
-        cursor.execute("ALTER TABLE user_points ADD COLUMN pet_name TEXT DEFAULT 'ごはんたべたい'")
-    if "gender" not in columns:
-        cursor.execute("ALTER TABLE user_points ADD COLUMN gender TEXT DEFAULT 'オス'")
-    if "stage" not in columns:
-        cursor.execute("ALTER TABLE user_points ADD COLUMN stage INTEGER DEFAULT 1")
+    if "pet_type" not in columns:
+        cursor.execute("ALTER TABLE user_points ADD COLUMN pet_type TEXT DEFAULT ''")
 
     conn.commit()
     conn.close()
 
 def get_user_data(user_id: int):
-    """ユーザーのデータを取得する（新規ユーザーの場合は自動作成）"""
     conn = sqlite3.connect("gohan_bot.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT points, pet_name, gender, stage, toilet_count, last_toilet_date FROM user_points WHERE user_id = ?", (user_id,))
+    cursor.execute("""
+        SELECT points, pet_name, gender, stage, toilet_count, last_toilet_date, pet_type 
+        FROM user_points WHERE user_id = ?
+    """, (user_id,))
     row = cursor.fetchone()
     
     if row is None:
-        # 新規登録処理（性別はランダム）
         gender = random.choice(["オス", "メス"])
         cursor.execute(
-            "INSERT INTO user_points (user_id, points, pet_name, gender, stage) VALUES (?, 0, ?, ?, 1)",
-            (user_id, DEFAULT_PET_NAME, gender)
+            "INSERT INTO user_points (user_id, points, pet_name, gender, stage, pet_type) VALUES (?, 0, '', ?, 1, '')",
+            (user_id, gender)
         )
         conn.commit()
         conn.close()
-        return {"points": 0, "pet_name": DEFAULT_PET_NAME, "gender": gender, "stage": 1, "toilet_count": 0, "last_toilet_date": ""}
+        return {
+            "points": 0, "pet_name": "", "gender": gender, 
+            "stage": 1, "toilet_count": 0, "last_toilet_date": "", "pet_type": ""
+        }
     
     conn.close()
     return {
         "points": row[0],
-        "pet_name": row[1] if row[1] else DEFAULT_PET_NAME,
+        "pet_name": row[1],
         "gender": row[2] if row[2] else "オス",
         "stage": row[3] if row[3] else 1,
         "toilet_count": row[4],
-        "last_toilet_date": row[5]
+        "last_toilet_date": row[5],
+        "pet_type": row[6] if row[6] else ""
     }
 
+def get_current_form_info(stage: int, pet_type: str, gender: str):
+    """現在のステージ・タイプ・性別から表示用データ（デフォルト名、身長、説明）を取得"""
+    if stage == 1:
+        return EVOLUTION_FORMS["stage1"]
+    elif stage == 2:
+        return EVOLUTION_FORMS["stage2"].get(pet_type, EVOLUTION_FORMS["stage2"]["A"])
+    elif stage == 3:
+        type_dict = EVOLUTION_FORMS["stage3"].get(pet_type, EVOLUTION_FORMS["stage3"]["A"])
+        return type_dict.get(gender, type_dict["オス"])
+    return EVOLUTION_FORMS["stage1"]
+
 def set_pet_name(user_id: int, name: str):
-    """ペットの名前を変更・保存する"""
     conn = sqlite3.connect("gohan_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT points FROM user_points WHERE user_id = ?", (user_id,))
@@ -174,18 +207,21 @@ def set_pet_name(user_id: int, name: str):
     conn.close()
 
 def update_points_and_check_evolution(user_id: int, add_pts: int) -> tuple[int, int, bool]:
-    """ポイントを加算・減算し、条件を満たしていれば進化させる"""
+    """ポイントの加算と進化チェック"""
     data = get_user_data(user_id)
     current_pts = data["points"]
     current_stage = data["stage"]
+    current_type = data["pet_type"]
     
     new_pts = current_pts + add_pts
     new_stage = current_stage
+    new_type = current_type
     evolved = False
 
-    # ★進化条件の閾値設定（ここを変更すると進化に必要なptが変わります）
+    # ★ 進化判定（10せいちょうで第2段階、1000せいちょうで第3段階）
     if current_stage == 1 and new_pts >= 10:
         new_stage = 2
+        new_type = random.choice(["A", "B", "C", "D", "E"])  # タイプA〜Eをランダム決定
         evolved = True
     elif current_stage == 2 and new_pts >= 1000:
         new_stage = 3
@@ -193,20 +229,22 @@ def update_points_and_check_evolution(user_id: int, add_pts: int) -> tuple[int, 
 
     conn = sqlite3.connect("gohan_bot.db")
     cursor = conn.cursor()
-    cursor.execute("UPDATE user_points SET points = ?, stage = ? WHERE user_id = ?", (new_pts, new_stage, user_id))
+    cursor.execute("""
+        UPDATE user_points SET points = ?, stage = ?, pet_type = ? WHERE user_id = ?
+    """, (new_pts, new_stage, new_type, user_id))
     conn.commit()
     conn.close()
 
     return new_pts, new_stage, evolved
 
 def reset_pet_data(user_id: int) -> str:
-    """「旅に出ろ」実行時にデータをリセット（初期化）する"""
+    """「旅に出ろ」実行時のリセット処理"""
     new_gender = random.choice(["オス", "メス"])
     conn = sqlite3.connect("gohan_bot.db")
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE user_points 
-        SET points = 0, stage = 1, pet_name = 'ごはんたべたい', gender = ?, toilet_count = 0, last_toilet_date = ''
+        SET points = 0, stage = 1, pet_name = '', gender = ?, toilet_count = 0, last_toilet_date = '', pet_type = ''
         WHERE user_id = ?
     """, (new_gender, user_id))
     conn.commit()
@@ -214,16 +252,13 @@ def reset_pet_data(user_id: int) -> str:
     return new_gender
 
 def process_toilet(user_id: int) -> tuple[bool, int, str, int, int, bool]:
-    """トイレ処理の判定と実行（1日10回制限）"""
     data = get_user_data(user_id)
-    today_str = str(date.today())  # 今日の日付（YYYY-MM-DD）を取得
+    today_str = str(date.today())
 
     count = data["toilet_count"]
-    # 日付が変わっていたら回数を0にリセット
     if data["last_toilet_date"] != today_str:
         count = 0
 
-    # 1日の最大制限数（10回）を超えていたら失敗として処理を抜ける
     if count >= MAX_TOILET_PER_DAY:
         return False, 0, f"今日はもうトイレに行けないよ！（1日{MAX_TOILET_PER_DAY}回まで）", data["points"], 0, False
 
@@ -231,7 +266,6 @@ def process_toilet(user_id: int) -> tuple[bool, int, str, int, int, bool]:
     add_pts, comment = random.choice(TOILET_TABLE)
     new_pts, new_stage, evolved = update_points_and_check_evolution(user_id, add_pts)
 
-    # データベースのトイレ回数と日付を更新
     conn = sqlite3.connect("gohan_bot.db")
     cursor = conn.cursor()
     cursor.execute("""
@@ -240,25 +274,21 @@ def process_toilet(user_id: int) -> tuple[bool, int, str, int, int, bool]:
     conn.commit()
     conn.close()
 
-    # 今日の残りトイレ回数を計算 (10 - 現在の回数)
     remaining_turns = MAX_TOILET_PER_DAY - count
     return True, add_pts, comment, new_pts, remaining_turns, evolved
 
 # --------------------------------------------------
-# 6. Discord イベントハンドラー (メッセージ受信時の処理)
+# 6. Discord イベントハンドラー
 # --------------------------------------------------
 @bot.event
 async def on_ready():
-    """Bot起動時に実行される処理"""
-    init_db()  # DBのセットアップ
+    init_db()
     print("=" * 50)
     print(f"🎉 ログイン成功！ Bot名: {bot.user.name} (ID: {bot.user.id})")
     print("=" * 50)
 
 @bot.event
 async def on_message(message):
-    """ユーザーからメッセージが届いた時の処理"""
-    # Bot自身の発言には反応しない（無限ループ防止）
     if message.author.bot:
         return
 
@@ -266,7 +296,7 @@ async def on_message(message):
     user_id = message.author.id
     channel_id = message.channel.id
 
-    # --- 処理1: 「ごはんのコマンド」（ヘルプ画面） ---
+    # --- 1. 「ごはんのコマンド」（ヘルプ画面） ---
     if content == "ごはんのコマンド":
         embed = discord.Embed(
             title="🍚 ごはんBotのコマンド一覧",
@@ -282,7 +312,7 @@ async def on_message(message):
         await message.channel.send(embed=embed)
         return
 
-    # --- 処理2: 「旅に出ろ」関連（ペットリセット処理） ---
+    # --- 2. 「旅に出ろ」関連 ---
     if content == "旅に出ろ":
         confirm_leaving_set.add(user_id)
         await message.channel.send("僕旅に出ちゃうよ")
@@ -294,14 +324,14 @@ async def on_message(message):
             new_gender = reset_pet_data(user_id)
             await message.channel.send(
                 f"バイバイ！今までありがとう！いってきます！✈️\n\n"
-                f"✨ 新しい命が生まれました！（性別: **{new_gender}** / 体重: **0pt**）\n"
+                f"✨ 新しい命が生まれました！（性別: **{new_gender}** / 体重: **0せいちょう**）\n"
                 f"たくさんご飯をあげて育ててあげてね！"
             )
             return
         else:
             confirm_leaving_set.remove(user_id)
 
-    # --- 処理3: 「ごはんの名前は〇〇」（名前の変更） ---
+    # --- 3. 「ごはんの名前は〇〇」（名前の変更） ---
     if content.startswith("ごはんの名前は"):
         new_name = content.replace("ごはんの名前は", "").strip()
         
@@ -317,43 +347,49 @@ async def on_message(message):
         await message.channel.send(f"✨ パートナーの名前を **「{new_name}」** に変更したよ！")
         return
 
-    # --- 処理4: 「ごはんのステータス」（状態表示） ---
+    # --- 4. 「ごはんのステータス」（状態表示） ---
     if content == "ごはんのステータス":
         data = get_user_data(user_id)
-        stage_info = EVOLUTION_FORMS.get(data["stage"], EVOLUTION_FORMS[1])
+        form_info = get_current_form_info(data["stage"], data["pet_type"], data["gender"])
+        
+        # ユーザー設定の名前がなければデフォルト名を表示
+        display_name = data["pet_name"] if data["pet_name"] else form_info["name"]
         
         await message.channel.send(
             f"🍚 **{message.author.display_name}** さんのパートナー情報\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"【なまえ】**{data['pet_name']}**\n"
-            f"【姿・種族】**{stage_info['name']}** (第{data['stage']}段階)\n"
+            f"【なまえ】**{display_name}**\n"
+            f"【姿・種族】**{form_info['name']}** (第{data['stage']}段階)\n"
             f"【性別】**{data['gender']}**\n"
-            f"【身長】**{stage_info['height']}**\n"
-            f"【体重】**{data['points']} pt**\n"
+            f"【身長】**{form_info['height']}**\n"
+            f"【体重】**{data['points']} せいちょう**\n"
+            f"【とくちょう】{form_info['desc']}\n"
             f"━━━━━━━━━━━━━━━━━━"
         )
         return
 
-    # --- 処理5: 「〇〇食え」（ご飯をあげる） ---
+    # --- 5. 「〇〇食え」（ご飯をあげる） ---
     target_food = last_food_dict.get(channel_id)
 
     if target_food and content == f"{target_food}食え":
         pts, comment = random.choice(POINT_TABLE)
         new_pts, new_stage, evolved = update_points_and_check_evolution(user_id, pts)
         
-        del last_food_dict[channel_id]  # 一度食べたら記憶を消去
+        del last_food_dict[channel_id]
         data = get_user_data(user_id)
 
         msg = (
             f"むしゃむしゃ……！\n"
-            f"{target_food}をたべた！（評価：{comment} / {pts:+d}pt）\n"
-            f"現在の体重: **{new_pts}pt**"
+            f"{target_food}をたべた！（評価：{comment} / {pts:+d}せいちょう）\n"
+            f"現在の体重: **{new_pts}せいちょう**"
         )
         
         if evolved:
-            new_info = EVOLUTION_FORMS.get(new_stage, EVOLUTION_FORMS[1])
-            msg += f"\n\n✨ **おや……！？ {data['pet_name']} のようすが……！**\n" \
-                   f"**{new_info['name']}** に進化しました！（身長: {new_info['height']}）"
+            form_info = get_current_form_info(new_stage, data["pet_type"], data["gender"])
+            call_name = data["pet_name"] if data["pet_name"] else "パートナー"
+            msg += f"\n\n✨ **おや……！？ {call_name} のようすが……！**\n" \
+                   f"**{form_info['name']}** に進化しました！（身長: {form_info['height']}）\n" \
+                   f"📝 {form_info['desc']}"
 
         await message.channel.send(msg)
         return
@@ -365,43 +401,44 @@ async def on_message(message):
             await message.channel.send("なにをたべればいいの？")
         return
 
-    # --- 処理6: 「トイレに行け」（トイレに行かせる） ---
+    # --- 6. 「トイレに行け」（トイレに行かせる） ---
     if content == "トイレに行け":
         success, pts, comment, total_pts, remaining, evolved = process_toilet(user_id)
         data = get_user_data(user_id)
+        form_info = get_current_form_info(data["stage"], data["pet_type"], data["gender"])
+        call_name = data["pet_name"] if data["pet_name"] else form_info["name"]
         
         if success:
             msg = (
-                f"トコトコ……🚽（{data['pet_name']}がトイレに行ってきた！）\n"
-                f"結果：{comment}（{pts:+d}pt）\n"
-                f"現在の体重: **{total_pts}pt**（今日の残りトイレ回数: {remaining}回）"
+                f"トコトコ……🚽（{call_name}がトイレに行ってきた！）\n"
+                f"結果：{comment}（{pts:+d}せいちょう）\n"
+                f"現在の体重: **{total_pts}せいちょう**（今日の残りトイレ回数: {remaining}回）"
             )
             if evolved:
-                new_info = EVOLUTION_FORMS.get(data["stage"], EVOLUTION_FORMS[1])
-                msg += f"\n\n✨ **おや……！？ {data['pet_name']} のようすが……！**\n" \
-                       f"スッキリして **{new_info['name']}** に進化しました！（身長: {new_info['height']}）"
+                new_data = get_user_data(user_id)
+                new_form_info = get_current_form_info(new_data["stage"], new_data["pet_type"], new_data["gender"])
+                msg += f"\n\n✨ **おや……！？ {call_name} のようすが……！**\n" \
+                       f"スッキリして **{new_form_info['name']}** に進化しました！（身長: {new_form_info['height']}）\n" \
+                       f"📝 {new_form_info['desc']}"
             await message.channel.send(msg)
         else:
             await message.channel.send(f"🚽 {comment}")
         return
 
-    # --- 処理7: 会話内の食べ物（名詞）抽出と「〇〇、食べたいなぁ」の反応 ---
+    # --- 7. 会話内の食べ物（名詞）抽出 ---
     tokens = tokenizer_obj.tokenize(content, mode)
     detected_words = []
 
-    # 除外したい言葉（ノイズ）の正規表現パターン
     NOISE_PATTERN = re.compile(r'^(w+|ｗ+|草+|笑+|あ|い|う|え|お|これ|それ|あれ|どれ|やつ|こと|もの|ため|よう|さん|ちゃん|くん|てす|テスト)$', re.IGNORECASE)
 
     for token in tokens:
         pos = token.part_of_speech()
-        # 名詞（普通名詞・固有名詞）を抽出
         if pos[0] == '名詞' and pos[1] in ['普通名詞', '固有名詞']:
             surface = token.surface().strip()
 
             if len(surface) <= 1:
                 continue
 
-            # 記号や1文字の繰り返しなどのノイズを除外
             if re.match(r'^[a-zA-Z0-9\W_]+$', surface) or re.match(r'^(.)\1+$', surface):
                 if surface not in ["もも", "みかん"]: 
                     continue
@@ -414,7 +451,6 @@ async def on_message(message):
 
             detected_words.append(surface)
 
-    # 最初に見つかった単語をチャンネルの「直近の食べ物」として記録
     if detected_words:
         selected_word = detected_words[0]
         last_food_dict[channel_id] = selected_word
@@ -426,24 +462,22 @@ async def on_message(message):
 if __name__ == "__main__":
     print("🚀 アプリケーションを起動しています...")
     
-    # 1. Flask（Webサーバー）をバックグラウンドで起動
     t = Thread(target=run_flask, daemon=True)
     t.start()
     print("🌐 Webサーバー (Flask) を起動しました。")
 
-    # 2. Discord Botのログインと起動
     TOKEN = os.environ.get("DISCORD_TOKEN")
     
     if not TOKEN:
-        print("❌ 【重大なエラー】環境変数 'DISCORD_TOKEN' が取得できませんでした！ RenderのEnvironment画面を確認してください。")
+        print("❌ 【重大なエラー】環境変数 'DISCORD_TOKEN' が取得できませんでした！")
     else:
         TOKEN = TOKEN.strip()
         print("🔑 トークンの取得に成功しました。Discordへの接続を開始します...")
         try:
             bot.run(TOKEN)
         except discord.errors.LoginFailure:
-            print("❌ 【ログインエラー】トークンが無効です。Discord Developer PortalでReset Tokenをして貼り直し、Renderで保存したか確認してください。")
+            print("❌ 【ログインエラー】トークンが無効です。")
         except discord.errors.PrivilegedIntentsRequired:
-            print("❌ 【Intentsエラー】Discord Developer Portalの'Bot'ページで'MESSAGE CONTENT INTENT'をONにしてください。")
+            print("❌ 【Intentsエラー】MESSAGE CONTENT INTENTをONにしてください。")
         except Exception as e:
             print(f"❌ 【予期せぬエラーが発生しました】: {e}")
